@@ -35,6 +35,7 @@ public sealed class OptimizerSessionService
 
         var timeoutMinutes = configuration.GetValue<int?>("OptimizerStateStore:SessionTtlMinutes") ?? 720;
         _inactivityTimeout = TimeSpan.FromMinutes(timeoutMinutes);
+        _logger.LogInformation("OptimizerSessionService initialized with inactivity timeout {TimeoutMinutes} minutes", timeoutMinutes);
     }
 
     public Guid Create(CreateOptimizerSessionRequest request)
@@ -150,8 +151,15 @@ public sealed class OptimizerSessionService
         double? totalRequiredPowerWatt = null,
         IReadOnlyList<OptimizerRequestUserLog>? users = null)
     {
+        _logger.LogDebug(
+            "Persist mutation: SessionId={SessionId}, EventType={EventType}, RequestTimestamp={RequestTimestamp}",
+            sessionId,
+            eventType,
+            requestTimestamp);
+
         if (!_stateStore.TryLoad(sessionId, out var persisted) || persisted is null)
         {
+            _logger.LogError("Persist mutation failed; unknown session {SessionId}", sessionId);
             throw new InvalidOperationException($"Cannot persist unknown session {sessionId}");
         }
 
@@ -166,6 +174,7 @@ public sealed class OptimizerSessionService
                 TotalRequiredPowerWatt: totalRequiredPowerWatt,
                 Users: users));
         Touch(sessionId);
+        _logger.LogDebug("Persist mutation completed: SessionId={SessionId}, EventType={EventType}", sessionId, eventType);
     }
 
     public bool TryPrepareData(Guid sessionId, PrepareDataRequest request, out SolverInputData? preparedData)
@@ -173,10 +182,12 @@ public sealed class OptimizerSessionService
         preparedData = null;
         if (!TryGet(sessionId, out var optimizer) || optimizer is null)
         {
+            _logger.LogWarning("PrepareData failed; session not found: {SessionId}", sessionId);
             return false;
         }
 
         preparedData = optimizer.PrepareData(request.Verbrauch);
+        _logger.LogDebug("PrepareData completed: SessionId={SessionId}, Values={ValueCount}", sessionId, request.Verbrauch.Length);
         return true;
     }
 
@@ -191,11 +202,13 @@ public sealed class OptimizerSessionService
 
         if (!TryGet(sessionId, out var optimizer) || optimizer is null)
         {
+            _logger.LogWarning("Preprocessing failed; session not found: {SessionId}", sessionId);
             return false;
         }
 
         if (!TryExtractUserPower(request.Nutzer, out var customers, out var requiredPowerWatt, out validationError))
         {
+            _logger.LogWarning("Preprocessing validation failed: SessionId={SessionId}, Error={ValidationError}", sessionId, validationError);
             return true;
         }
 
@@ -210,6 +223,7 @@ public sealed class OptimizerSessionService
             CalculateConsumedPower(preprocessingUsers),
             CalculateTotalRequiredPower(preprocessingUsers),
             preprocessingUsers);
+        _logger.LogInformation("Preprocessing completed: SessionId={SessionId}, Users={UserCount}", sessionId, requiredPowerWatt.Length);
         return true;
     }
 
@@ -217,6 +231,7 @@ public sealed class OptimizerSessionService
     {
         if (!TryGet(sessionId, out var optimizer) || optimizer is null)
         {
+            _logger.LogWarning("Postprocessing failed; session not found: {SessionId}", sessionId);
             return false;
         }
 
@@ -227,6 +242,7 @@ public sealed class OptimizerSessionService
             "postprocessing",
             request.Zeitstempel,
             optimizer.Erzeugung);
+        _logger.LogInformation("Postprocessing completed: SessionId={SessionId}", sessionId);
         return true;
     }
 
@@ -237,11 +253,13 @@ public sealed class OptimizerSessionService
 
         if (!TryGet(sessionId, out var optimizer) || optimizer is null)
         {
+            _logger.LogWarning("Run failed; session not found: {SessionId}", sessionId);
             return false;
         }
 
         if (!TryExtractUserPower(request.Nutzer, out var customers, out var requiredPowerWatt, out validationError))
         {
+            _logger.LogWarning("Run validation failed: SessionId={SessionId}, Error={ValidationError}", sessionId, validationError);
             return true;
         }
 
@@ -266,6 +284,11 @@ public sealed class OptimizerSessionService
             CalculateTotalRequiredPower(runUsers),
             runUsers);
         response = new RunResponse(result.Schaltzustand, result.ResOpt, result.ResOpt);
+        _logger.LogInformation(
+            "Run completed: SessionId={SessionId}, Users={UserCount}, AvailablePvPowerWatt={AvailablePvPowerWatt}",
+            sessionId,
+            requiredPowerWatt.Length,
+            request.PvErzeugungWatt);
         return true;
     }
 
@@ -274,6 +297,7 @@ public sealed class OptimizerSessionService
         state = null;
         if (!TryGet(sessionId, out var optimizer) || optimizer is null)
         {
+            _logger.LogWarning("GetState failed; session not found: {SessionId}", sessionId);
             return false;
         }
 
@@ -289,6 +313,7 @@ public sealed class OptimizerSessionService
             ToJagged(optimizer.Schaltzustand),
             optimizer.PvVerbrauchEnergieStand?.ToArray(),
             optimizer.VerbrauchEnergieStand?.ToArray());
+        _logger.LogDebug("GetState completed: SessionId={SessionId}", sessionId);
         return true;
     }
 
@@ -308,12 +333,18 @@ public sealed class OptimizerSessionService
         };
 
         _stateStore.Save(persisted);
+        _logger.LogDebug(
+            "Session state persisted: SessionId={SessionId}, UseOrTools={UseOrTools}, UseGreedyFallback={UseGreedyFallback}",
+            sessionId,
+            useOrTools,
+            useGreedyFallback);
     }
 
     private void Touch(Guid sessionId)
     {
         TouchLocal(sessionId);
         _stateStore.Touch(sessionId);
+        _logger.LogDebug("Session touched: {SessionId}", sessionId);
     }
 
     private void TouchLocal(Guid sessionId)
@@ -336,6 +367,7 @@ public sealed class OptimizerSessionService
         _cache.TryRemove(sessionId, out _);
         _lastAccessUtc.TryRemove(sessionId, out _);
         _stateStore.Delete(sessionId);
+        _logger.LogInformation("Session invalidated: {SessionId}", sessionId);
     }
 
     private Optimierer CreateOptimizer(int n, int sperrzeit1, int sperrzeit2, bool useOrTools, bool useGreedyFallback)
@@ -353,10 +385,18 @@ public sealed class OptimizerSessionService
 
         if (solvers.Count == 0)
         {
+            _logger.LogError("CreateOptimizer failed; no solver enabled");
             throw new InvalidOperationException("At least one solver must be enabled.");
         }
 
         var optimizerLogger = _loggerFactory.CreateLogger<Optimierer>();
+        _logger.LogDebug(
+            "Creating optimizer instance: N={N}, Sperrzeit1={Sperrzeit1}, Sperrzeit2={Sperrzeit2}, UseOrTools={UseOrTools}, UseGreedyFallback={UseGreedyFallback}",
+            n,
+            sperrzeit1,
+            sperrzeit2,
+            useOrTools,
+            useGreedyFallback);
         return new Optimierer(n, sperrzeit1, sperrzeit2, optimizerLogger, solvers);
     }
 

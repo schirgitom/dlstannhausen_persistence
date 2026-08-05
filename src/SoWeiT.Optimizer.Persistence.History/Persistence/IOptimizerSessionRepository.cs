@@ -8,6 +8,7 @@ public interface IOptimizerSessionRepository
 
     bool Exists(Guid sessionId);
 
+    int EndOpenSessions(DateTime endedAtUtc);
+
     void Add(OptimizerSessionEntry session);
 }
-

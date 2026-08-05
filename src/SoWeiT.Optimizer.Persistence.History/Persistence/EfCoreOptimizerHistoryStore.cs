@@ -26,9 +26,19 @@ public sealed class EfCoreOptimizerHistoryStore : IOptimizerHistoryStore
         _logger.LogInformation("Create session history start: SessionId={SessionId}", sessionId);
         using var uow = _unitOfWorkFactory.Create();
 
+        var closedSessionCount = uow.Sessions.EndOpenSessions(createdAtUtc);
+        if (closedSessionCount > 0)
+        {
+            _logger.LogInformation(
+                "Closed previously open sessions before creating a new one: Count={Count}, SessionId={SessionId}",
+                closedSessionCount,
+                sessionId);
+        }
+
         var entity = uow.Sessions.FindById(sessionId);
         if (entity is null)
         {
+            _logger.LogDebug("Session does not exist yet; creating new session entity: SessionId={SessionId}", sessionId);
             entity = new OptimizerSessionEntry
             {
                 SessionId = sessionId,
@@ -44,6 +54,7 @@ public sealed class EfCoreOptimizerHistoryStore : IOptimizerHistoryStore
         }
         else
         {
+            _logger.LogDebug("Session exists; updating existing session entity: SessionId={SessionId}", sessionId);
             entity.N = sessionConfig.N;
             entity.Sperrzeit1 = sessionConfig.Sperrzeit1;
             entity.Sperrzeit2 = sessionConfig.Sperrzeit2;
@@ -97,7 +108,7 @@ public sealed class EfCoreOptimizerHistoryStore : IOptimizerHistoryStore
         {
             SessionId = sessionId,
             RequestType = request.RequestType,
-            RequestTimestamp = request.RequestTimestamp,
+            RequestTimestamp = request.RequestTimestamp.ToUniversalTime(),
             CreatedAtUtc = DateTime.UtcNow,
             AvailablePvPowerWatt = request.AvailablePvPowerWatt,
             ConsumedPowerWatt = request.ConsumedPowerWatt,
@@ -112,6 +123,11 @@ public sealed class EfCoreOptimizerHistoryStore : IOptimizerHistoryStore
                 var customerNumber = user.Customer.Trim();
                 if (customerNumber.Length == 0)
                 {
+                    _logger.LogWarning(
+                        "Request history append failed; user has empty customer number: SessionId={SessionId}, RequestType={RequestType}, UserIndex={UserIndex}",
+                        sessionId,
+                        request.RequestType,
+                        user.UserIndex);
                     throw new InvalidOperationException("Customer number must not be empty.");
                 }
 
@@ -120,6 +136,11 @@ public sealed class EfCoreOptimizerHistoryStore : IOptimizerHistoryStore
                     customerEntity = uow.DbContext.Customers.SingleOrDefault(x => x.CustomerNumber == customerNumber);
                     if (customerEntity is null)
                     {
+                        _logger.LogWarning(
+                            "Request history append failed; customer not found: SessionId={SessionId}, RequestType={RequestType}, CustomerNumber={CustomerNumber}",
+                            sessionId,
+                            request.RequestType,
+                            customerNumber);
                         throw new InvalidOperationException(
                             $"Customer with customer number '{customerNumber}' was not found.");
                     }
@@ -150,4 +171,3 @@ public sealed class EfCoreOptimizerHistoryStore : IOptimizerHistoryStore
             requestEntity.Users.Count);
     }
 }
-

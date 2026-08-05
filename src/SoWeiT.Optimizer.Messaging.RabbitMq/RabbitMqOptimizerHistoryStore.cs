@@ -21,6 +21,12 @@ public sealed class RabbitMqOptimizerHistoryStore : IOptimizerHistoryStore, IDis
         _logger = logger;
         var options = configuration.GetSection("RabbitMq").Get<RabbitMqHistoryOptions>() ?? new RabbitMqHistoryOptions();
         _queueName = options.QueueName;
+        _logger.LogInformation(
+            "Initializing RabbitMQ history publisher: Host={Host}, Port={Port}, VirtualHost={VirtualHost}, Queue={QueueName}",
+            options.HostName,
+            options.Port,
+            options.VirtualHost,
+            _queueName);
 
         var factory = new ConnectionFactory
         {
@@ -34,6 +40,7 @@ public sealed class RabbitMqOptimizerHistoryStore : IOptimizerHistoryStore, IDis
         _connection = factory.CreateConnection("optimizer-api-history-publisher");
         using var channel = _connection.CreateModel();
         channel.QueueDeclare(queue: _queueName, durable: true, exclusive: false, autoDelete: false, arguments: null);
+        _logger.LogInformation("RabbitMQ history publisher ready for queue {QueueName}", _queueName);
     }
 
     public void CreateSession(Guid sessionId, OptimizerSessionConfig sessionConfig, DateTime createdAtUtc)
@@ -76,6 +83,7 @@ public sealed class RabbitMqOptimizerHistoryStore : IOptimizerHistoryStore, IDis
 
     public void Dispose()
     {
+        _logger.LogInformation("Disposing RabbitMQ history publisher connection");
         _connection.Dispose();
     }
 }
