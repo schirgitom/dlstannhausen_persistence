@@ -1,51 +1,149 @@
-version: "3.9"
-
 services:
-
-  dls-tannhausen-timescaledb:
-    image: timescale/timescaledb:latest-pg18
-    container_name: dls-tannhausen-timescaledb
-    restart: unless-stopped
+  th_rabbitmq:
+    image: rabbitmq:management
+    container_name: th_rabbitmq
+    restart: always
     environment:
-      POSTGRES_DB: appdb
-      POSTGRES_USER: dlstannhausen
-      POSTGRES_PASSWORD: dlstannhausen
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
     ports:
-      - "5433:5432"
-    volumes:
-      - timescaledb_data:/var/lib/postgresql/data
+      - "5672:5672"
+      - "15672:15672"
     networks:
-      - backend
-
-  dls-tannhausen-redis:
-    image: redis:latest
-    container_name: dls-tannhausen-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
+      - th_backend
     volumes:
-      - ./redis_data:/data
-    command: redis-server --appendonly yes
-    networks:
-      - backend
+      - th_rabbitmq_data:/var/lib/rabbitmq
+      - th_rabbitmq_log:/var/log/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
-  dls-tannhausen-seq:
+  th_seq:
     image: datalust/seq:latest
-    container_name: dls-tannhausen-seq
-    restart: unless-stopped
+    container_name: th_seq
+    restart: always
     environment:
       ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
     ports:
       - "5341:80"
-    volumes:
-      - ./seq_data:/data
+      - "5342:5341"
     networks:
-      - backend
+      - th_backend
+    volumes:
+      - th_seq_data:/data
+
+  th_timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: th_timescaledb
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Tannhausen2026!
+      POSTGRES_DB: soweit_optimizer
+    ports:
+      - "5433:5432"
+    networks:
+      - th_backend
+    volumes:
+      - th_timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d soweit_optimizer"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  th_consul:
+    image: hashicorp/consul:latest
+    container_name: th_consul
+    restart: always
+    command:
+      - agent
+      - -server
+      - -ui
+      - -node=th-consul
+      - -bootstrap-expect=1
+      - -client=0.0.0.0
+      - -data-dir=/consul/data
+    ports:
+      - "8500:8500"
+      - "8600:8600/tcp"
+      - "8600:8600/udp"
+    networks:
+      - th_backend
+    volumes:
+      - th_consul_data:/consul/data
+    healthcheck:
+      test: ["CMD", "consul", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  th_grafana:
+    image: grafana/grafana:latest
+    container_name: th_grafana
+    restart: always
+    depends_on:
+      th_timescaledb:
+        condition: service_healthy
+    environment:
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: th_timescaledb:5432
+      GF_DATABASE_NAME: soweit_optimizer
+      GF_DATABASE_USER: postgres
+      GF_DATABASE_PASSWORD: Tannhausen2026!
+      GF_DATABASE_SSL_MODE: disable
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: Tannhausen2026!
+      GF_USERS_DEFAULT_THEME: light
+    ports:
+      - "3000:3000"
+    networks:
+      - th_backend
+    volumes:
+      - th_grafana_data:/var/lib/grafana
+
+  th_optimizer_worker:
+    build:
+      context: .
+      dockerfile: src/SoWeiT.Optimizer.Persister.Worker/Dockerfile
+    container_name: th_optimizer_worker
+    restart: always
+    depends_on:
+      th_timescaledb:
+        condition: service_healthy
+      th_rabbitmq:
+        condition: service_healthy
+      th_consul:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      Consul__Address: http://th_consul:8500
+      Consul__KeyPrefix: DLTannhausen
+      ConnectionStrings__Postgres: Host=th_timescaledb;Port=5432;Database=soweit_optimizer;Username=postgres;Password=Tannhausen2026!
+      RabbitMq__HostName: th_rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: admin
+      RabbitMq__Password: admin
+      RabbitMq__VirtualHost: /
+      RabbitMq__QueueName: optimizer.history
+      RabbitMq__MaxRetryCount: 5
+    networks:
+      - th_backend
 
 volumes:
-  timescaledb_data:
-
+  th_rabbitmq_data:
+  th_rabbitmq_log:
+  th_seq_data:
+  th_timescaledb_data:
+  th_consul_data:
+  th_grafana_data:
 
 networks:
-  backend:
+  th_backend:
     driver: bridge
