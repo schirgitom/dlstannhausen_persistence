@@ -132,6 +132,7 @@ services:
       RabbitMq__Password: admin
       RabbitMq__VirtualHost: /
       RabbitMq__QueueName: optimizer.history
+      RabbitMq__FieldDataQueueName: optimizer.fielddata
       RabbitMq__MaxRetryCount: 5
     networks:
       - th_backend

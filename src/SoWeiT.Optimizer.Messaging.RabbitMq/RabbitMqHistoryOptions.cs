@@ -14,5 +14,7 @@ public sealed class RabbitMqHistoryOptions
 
     public string QueueName { get; set; } = "optimizer.history";
 
+    public string FieldDataQueueName { get; set; } = "optimizer.fielddata";
+
     public int MaxRetryCount { get; set; } = 5;
 }

@@ -1,0 +1,209 @@
+{
+  "uid": "optimizer-lifetime",
+  "title": "Optimizer | Gesamte Laufzeit",
+  "tags": ["optimizer", "direktleitung", "historie"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "5m",
+  "time": {"from": "2026-01-01T00:00:00Z", "to": "now"},
+  "graphTooltip": 1,
+  "__inputs": [
+    {"name": "DS_POSTGRES", "label": "Optimizer PostgreSQL", "description": "", "type": "datasource", "pluginId": "grafana-postgresql-datasource", "pluginName": "PostgreSQL"}
+  ],
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Sessions insgesamt",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "value", "colorMode": "value"},
+      "targets": [{"refId": "A", "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"Sessions\" FROM optimizer_sessions"}]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Optimierer-Läufe insgesamt",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "value", "colorMode": "value"},
+      "targets": [{"refId": "A", "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"run-Ereignisse\" FROM optimizer_requests WHERE \"RequestType\" = 'run'"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Feldmesswerte insgesamt",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "value", "colorMode": "value"},
+      "targets": [{"refId": "A", "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"Messwerte\" FROM optimizer_field_data"}]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Optimierer: PV, Verbrauch und Überschuss im Verlauf",
+      "description": "Intervall-Mittelwerte aus run-Ereignissen; berechneter Überschuss = max(PV verfügbar - Verbrauch laut Optimierer, 0), kein Netzexport.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 5},
+      "fieldConfig": {"defaults": {"unit": "watt", "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": false}}, "overrides": [{"matcher": {"id": "byName", "options": "Überschuss (berechnet)"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]}]},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(r.\"RequestTimestamp\", $__interval), avg(r.\"AvailablePvPowerWatt\") AS \"PV verfügbar\", avg(r.\"ConsumedPowerWatt\") AS \"Verbrauch (Optimierer)\", avg(r.\"TotalRequiredPowerWatt\") AS \"Bedarf\", avg(GREATEST(r.\"AvailablePvPowerWatt\" - r.\"ConsumedPowerWatt\", 0)) AS \"Überschuss (berechnet)\" FROM optimizer_requests r WHERE r.\"RequestType\" = 'run' AND $__timeFilter(r.\"RequestTimestamp\") GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Soll-EIN je Optimierer-Lauf",
+      "description": "Mittlere Anzahl Soll-EIN-Entscheidungen pro run im Zeitintervall, keine tatsächlichen Schaltvorgänge.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 15},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 1, "min": 0, "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "hidden"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (SELECT r.\"RequestTimestamp\" AS time, count(*) FILTER (WHERE u.\"ShouldSwitch\" IS TRUE) AS on_count FROM optimizer_requests r LEFT JOIN optimizer_request_users u ON u.\"RequestEntryId\" = r.\"Id\" WHERE r.\"RequestType\" = 'run' AND $__timeFilter(r.\"RequestTimestamp\") GROUP BY r.\"Id\", r.\"RequestTimestamp\") SELECT $__timeGroupAlias(time, $__interval), avg(on_count)::double precision AS \"Soll EIN (Durchschnitt)\" FROM runs GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Soll-Schaltwechsel je Kunde",
+      "description": "Änderungen von ShouldSwitch zwischen aufeinanderfolgenden run-Ereignissen derselben Session. Keine physisch gemessenen Schaltungen.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 15},
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0}, "overrides": []},
+      "options": {"orientation": "horizontal", "xField": "Kunde", "showValue": "auto", "stacking": "off", "legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH decisions AS (SELECT r.\"RequestTimestamp\" AS time, u.\"CustomerId\" AS customer_id, u.\"ShouldSwitch\" AS state, lag(u.\"ShouldSwitch\") OVER (PARTITION BY r.\"SessionId\", u.\"CustomerId\" ORDER BY r.\"RequestTimestamp\", r.\"Id\") AS previous FROM optimizer_requests r JOIN optimizer_request_users u ON u.\"RequestEntryId\" = r.\"Id\" WHERE r.\"RequestType\" = 'run' AND u.\"ShouldSwitch\" IS NOT NULL) SELECT c.\"Name\" || ' (' || COALESCE(c.\"CustomerNumber\", c.\"Id\"::text) || ')' AS \"Kunde\", count(*) FILTER (WHERE d.state IS TRUE AND d.previous IS FALSE) AS \"Soll AUS zu EIN\", count(*) FILTER (WHERE d.state IS FALSE AND d.previous IS TRUE) AS \"Soll EIN zu AUS\" FROM decisions d JOIN customers c ON c.\"Id\" = d.customer_id WHERE $__timeFilter(d.time) GROUP BY c.\"Id\", c.\"Name\", c.\"CustomerNumber\" ORDER BY \"Soll AUS zu EIN\" DESC, \"Kunde\""
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "PV-Wechselrichter: Leistung je Station",
+      "description": "Intervall-Mittelwerte der PvYield/PowerWatt-Feldmessungen.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 33},
+      "fieldConfig": {"defaults": {"unit": "watt", "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(f.\"Timestamp\", $__interval), f.\"Station\" AS metric, avg(f.\"Value\") AS value FROM optimizer_field_data f WHERE f.\"Type\" = 'PvYield' AND f.\"Variable\" = 'PowerWatt' AND $__timeFilter(f.\"Timestamp\") GROUP BY 1, f.\"Station\" ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Verbrauchsstationen: Leistung je Station",
+      "description": "Intervall-Mittelwerte der StationConsumption/PowerWatt-Feldmessungen.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 33},
+      "fieldConfig": {"defaults": {"unit": "watt", "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(f.\"Timestamp\", $__interval), f.\"Station\" AS metric, avg(f.\"Value\") AS value FROM optimizer_field_data f WHERE f.\"Type\" = 'StationConsumption' AND f.\"Variable\" = 'PowerWatt' AND $__timeFilter(f.\"Timestamp\") GROUP BY 1, f.\"Station\" ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Leistung Richtung DLS",
+      "description": "Intervall-Mittelwerte der DirectLinePower/PowerWatt-Feldmessungen, Vorzeichen unverändert.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 42},
+      "fieldConfig": {"defaults": {"unit": "watt", "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(f.\"Timestamp\", $__interval), f.\"Station\" AS metric, avg(f.\"Value\") AS value FROM optimizer_field_data f WHERE f.\"Type\" = 'DirectLinePower' AND f.\"Variable\" = 'PowerWatt' AND $__timeFilter(f.\"Timestamp\") GROUP BY 1, f.\"Station\" ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Kundenmesspunkte: Leistung je Kunde",
+      "description": "CustomerMeter-Rohwerte mit Variable Leistung oder PowerWatt. Für Leistung ist keine Einheit im Nachrichtennamen festgelegt; die Reihen bleiben getrennt.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 42},
+      "fieldConfig": {"defaults": {"unit": "none", "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(f.\"Timestamp\", $__interval), c.\"Name\" || ' (' || COALESCE(c.\"CustomerNumber\", c.\"Id\"::text) || ') / ' || f.\"Variable\" AS metric, avg(f.\"Value\") AS value FROM optimizer_field_data f JOIN customers c ON c.\"Id\" = f.\"CustomerId\" WHERE f.\"Type\" = 'CustomerMeter' AND f.\"Variable\" IN ('Leistung', 'PowerWatt') AND $__timeFilter(f.\"Timestamp\") GROUP BY 1, c.\"Id\", c.\"Name\", c.\"CustomerNumber\", f.\"Variable\" ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Sessions im Überblick",
+      "description": "Alle Sessions; run-Zahlen und Leistungs-Mittelwerte je Session. Nicht mit Energie in kWh verwechseln.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 11, "w": 24, "x": 0, "y": 51},
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT s.\"CreatedAtUtc\" AS \"Start\", s.\"EndedAtUtc\" AS \"Ende\", s.\"SessionId\"::text AS \"Session-ID\", count(r.\"Id\") AS \"run-Ereignisse\", round(avg(r.\"AvailablePvPowerWatt\")::numeric, 0) AS \"PV-Mittel (W)\", round(avg(GREATEST(r.\"AvailablePvPowerWatt\" - r.\"ConsumedPowerWatt\", 0))::numeric, 0) AS \"Überschuss-Mittel (W)\" FROM optimizer_sessions s LEFT JOIN optimizer_requests r ON r.\"SessionId\" = s.\"SessionId\" AND r.\"RequestType\" = 'run' GROUP BY s.\"SessionId\", s.\"CreatedAtUtc\", s.\"EndedAtUtc\" ORDER BY s.\"CreatedAtUtc\" DESC"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Benötigte Leistung je Kunde (Optimierer)",
+      "description": "Intervall-Mittelwert von RequiredPowerWatt je Kunde aus run-Ereignissen; unabhängig von der Soll-Schaltentscheidung.",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}"},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 24},
+      "fieldConfig": {"defaults": {"unit": "watt", "min": 0, "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(r.\"RequestTimestamp\", $__interval), c.\"Name\" || ' (' || COALESCE(c.\"CustomerNumber\", c.\"Id\"::text) || ')' AS metric, avg(u.\"RequiredPowerWatt\") AS value FROM optimizer_requests r JOIN optimizer_request_users u ON u.\"RequestEntryId\" = r.\"Id\" JOIN customers c ON c.\"Id\" = u.\"CustomerId\" WHERE r.\"RequestType\" = 'run' AND $__timeFilter(r.\"RequestTimestamp\") GROUP BY 1, c.\"Id\", c.\"Name\", c.\"CustomerNumber\" ORDER BY 1"
+        }
+      ]
+    }
+  ]
+}

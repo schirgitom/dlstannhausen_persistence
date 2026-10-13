@@ -11,4 +11,6 @@ public sealed class CustomerEntry
     public DateTime CreatedAtUtc { get; set; }
 
     public ICollection<OptimizerRequestUserEntry> RequestUsers { get; set; } = new List<OptimizerRequestUserEntry>();
+
+    public ICollection<OptimizerFieldDataEntry> FieldData { get; set; } = new List<OptimizerFieldDataEntry>();
 }

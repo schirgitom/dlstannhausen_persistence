@@ -50,6 +50,49 @@ namespace SoWeiT.Optimizer.Persistence.History.Migrations
                     b.ToTable("customers", (string)null);
                 });
 
+            modelBuilder.Entity("SoWeiT.Optimizer.Persistence.History.Data.OptimizerFieldDataEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("CustomerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Station")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<double>("Value")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Variable")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Timestamp");
+
+                    b.HasIndex("CustomerId", "Timestamp");
+
+                    b.HasIndex("Station", "Variable", "Timestamp");
+
+                    b.ToTable("optimizer_field_data", (string)null);
+                });
+
             modelBuilder.Entity("SoWeiT.Optimizer.Persistence.History.Data.OptimizerRequestEntry", b =>
                 {
                     b.Property<long>("Id")
@@ -170,6 +213,16 @@ namespace SoWeiT.Optimizer.Persistence.History.Migrations
                     b.ToTable("optimizer_sessions", (string)null);
                 });
 
+            modelBuilder.Entity("SoWeiT.Optimizer.Persistence.History.Data.OptimizerFieldDataEntry", b =>
+                {
+                    b.HasOne("SoWeiT.Optimizer.Persistence.History.Data.CustomerEntry", "Customer")
+                        .WithMany("FieldData")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Customer");
+                });
+
             modelBuilder.Entity("SoWeiT.Optimizer.Persistence.History.Data.OptimizerRequestEntry", b =>
                 {
                     b.HasOne("SoWeiT.Optimizer.Persistence.History.Data.OptimizerSessionEntry", "Session")
@@ -202,6 +255,8 @@ namespace SoWeiT.Optimizer.Persistence.History.Migrations
 
             modelBuilder.Entity("SoWeiT.Optimizer.Persistence.History.Data.CustomerEntry", b =>
                 {
+                    b.Navigation("FieldData");
+
                     b.Navigation("RequestUsers");
                 });
 

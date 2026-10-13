@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Npgsql;
 using Serilog;
+using SoWeiT.Optimizer.Messaging.RabbitMq;
 using SoWeiT.Optimizer.Persistence.History.Data;
 using SoWeiT.Optimizer.Persistence.History.Persistence;
 using SoWeiT.Optimizer.Persister.Worker;
@@ -86,18 +88,37 @@ builder.Services.AddDbContextFactory<OptimizerHistoryDbContext>(options =>
 });
 builder.Services.AddSingleton<IOptimizerUnitOfWorkFactory, EfCoreOptimizerUnitOfWorkFactory>();
 builder.Services.AddSingleton<IOptimizerHistoryStore, EfCoreOptimizerHistoryStore>();
+builder.Services.AddSingleton<IOptimizerFieldDataStore, EfCoreOptimizerFieldDataStore>();
 builder.Services.AddSingleton<RabbitMqHistoryConsumer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RabbitMqHistoryConsumer>());
+builder.Services.AddHostedService<RabbitMqFieldDataConsumer>();
 
 var host = builder.Build();
 var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+var rabbitMqOptions = builder.Configuration.GetSection("RabbitMq").Get<RabbitMqHistoryOptions>() ?? new RabbitMqHistoryOptions();
+startupLogger.LogInformation(
+    "Persister starting: Environment={Environment}, RabbitMqHost={Host}, Port={Port}, VirtualHost={VirtualHost}, HistoryQueue={HistoryQueue}, FieldDataQueue={FieldDataQueue}",
+    builder.Environment.EnvironmentName,
+    rabbitMqOptions.HostName,
+    rabbitMqOptions.Port,
+    rabbitMqOptions.VirtualHost,
+    rabbitMqOptions.QueueName,
+    rabbitMqOptions.FieldDataQueueName);
 
 using (var scope = host.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<OptimizerHistoryDbContext>>();
     using var dbContext = dbFactory.CreateDbContext();
     startupLogger.LogInformation("Applying database migrations");
-    dbContext.Database.Migrate();
+    try
+    {
+        dbContext.Database.Migrate();
+    }
+    catch (NpgsqlException ex)
+    {
+        startupLogger.LogCritical(ex, "Database migration failed; RabbitMQ consumers will not start");
+        throw;
+    }
     startupLogger.LogInformation("Database migrations applied");
 }
 

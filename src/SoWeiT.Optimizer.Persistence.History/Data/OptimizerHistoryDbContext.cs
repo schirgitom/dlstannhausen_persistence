@@ -17,6 +17,8 @@ public sealed class OptimizerHistoryDbContext : DbContext
 
     public DbSet<CustomerEntry> Customers => Set<CustomerEntry>();
 
+    public DbSet<OptimizerFieldDataEntry> FieldData => Set<OptimizerFieldDataEntry>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var customers = modelBuilder.Entity<CustomerEntry>();
@@ -80,6 +82,22 @@ public sealed class OptimizerHistoryDbContext : DbContext
             .WithMany(x => x.RequestUsers)
             .HasForeignKey(x => x.CustomerId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        var fieldData = modelBuilder.Entity<OptimizerFieldDataEntry>();
+        fieldData.ToTable("optimizer_field_data");
+        fieldData.HasKey(x => x.Id);
+        fieldData.Property(x => x.Id).ValueGeneratedOnAdd();
+        fieldData.Property(x => x.Timestamp).IsRequired();
+        fieldData.Property(x => x.Station).HasMaxLength(256).IsRequired();
+        fieldData.Property(x => x.Variable).HasMaxLength(256).IsRequired();
+        fieldData.Property(x => x.Type).HasMaxLength(32).IsRequired();
+        fieldData.Property(x => x.Value).IsRequired();
+        fieldData.HasIndex(x => x.Timestamp);
+        fieldData.HasIndex(x => new { x.Station, x.Variable, x.Timestamp });
+        fieldData.HasIndex(x => new { x.CustomerId, x.Timestamp });
+        fieldData.HasOne(x => x.Customer)
+            .WithMany(x => x.FieldData)
+            .HasForeignKey(x => x.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
-
