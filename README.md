@@ -46,7 +46,7 @@ configuration when choosing a data source.
 
 The current-session dashboard defaults to the most recently created *open*
 session (`EndedAtUtc IS NULL`). Its session selector also allows inspecting
-completed sessions; extend the dashboard time range beyond the default 24 hours
+completed sessions; extend the dashboard time range beyond the default 15 minutes
 when viewing an older one. Field measurements have no `SessionId`, so they
 are correlated with a session only by their timestamps falling between the
 session start and end. With no open session, "Aktuelle Session" shows no session
@@ -66,4 +66,9 @@ customer meters) and `PowerWatt`, keeps those series separate, and does not
 assume a unit for `Leistung`. The **Benötigte Leistung je Kunde** charts
 instead use the optimizer's `RequiredPowerWatt` from `run` events; the
 current-session dashboard also lists the last per-customer demand beside
-the corresponding intended switching decision.
+the corresponding intended switching decision. Its separate **Aktuell benötigte
+Leistung je Kunde (Node-RED)** panel shows `CustomerMeter` measurements with
+`Variable = RequiredPowerWatt`, joined to the customer by `CustomerId` and
+limited to the selected session by timestamp. It does not replace the
+optimizer's `RequiredPowerWatt` curve. Before Node-RED starts sending that
+variable, the new panel has no data.
